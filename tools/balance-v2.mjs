@@ -55,9 +55,9 @@ export const PARAMS = {
   ecoDockH: 6,
   minFlight: 12,
   /** Отклонения мира от расчёта Веры, часов. */
-  dev: { klyuch: -22, okolica: -30 },
+  dev: { klyuch: -22, okolica: -30, artel: 144, mayak: -24 },
   /** Когда новость об отклонении уже лежит в журнале пилота. */
-  news: { klyuch: at(7, 8), okolica: at(15, 8) },
+  news: { klyuch: at(7, 8), okolica: at(15, 8), artel: at(6, 8), mayak: at(17, 8) },
   stock: Object.fromEntries(STATIONS.map((s) => [s.id, s.stock])),
 }
 
@@ -176,6 +176,38 @@ export function solve(P, state, opts = {}) {
   return { best, routes }
 }
 
+/** Все планы без экономии, которые видны в первый день: до пяти станций, у каждой режим и слив. Пустые заходы не планируют. */
+const CAND = ['sinica', 'klyuch', 'smena', 'okolica', 'kolybel', 'zarya', 'mayak', 'artel', 'kordon', 'matryoshka']
+export function day1Plans(P) {
+  const out = []
+  function dfs(pos, t, fuel, aboard, vis, legs) {
+    if (legs.length && fuel >= P.minFlight) out.push(legs.slice())
+    if (legs.length >= 5) return
+    for (const id of CAND) {
+      if (vis.has(id)) continue
+      const s = ST[id]
+      for (const m of MODE_IDS) {
+        const md = MODES[m]
+        if (fuel < md.acc + md.brk) continue
+        const arr = t + dist(pos, s) * md.h
+        const n = arr <= trueT(P, id, false) ? Math.min(s.saved, P.seats - aboard) : 0
+        if (n === 0) continue
+        const f = fuel - md.acc - md.brk
+        const v2 = new Set(vis)
+        v2.add(id)
+        for (const dr of [false, true]) {
+          if (dr && !(P.stock[id] > 0)) continue
+          legs.push({ to: id, mode: m, drain: dr })
+          dfs(s, arr + P.dockH + (dr ? P.drainH : 0), dr ? Math.min(P.tank, f + P.stock[id]) : f, aboard + n, v2, legs)
+          legs.pop()
+        }
+      }
+    }
+  }
+  dfs({ x: 0, y: 0 }, 0, P.tank, 0, new Set(), [])
+  return out
+}
+
 export function describe(r) {
   const stops = r.route.map((x) => {
     const how = [MODE_RU[x.mode], x.eco ? 'экономия' : '', x.drain ? 'слив' : ''].filter(Boolean).join(', ')
@@ -271,9 +303,13 @@ function main() {
   check('максимум', top.best, 11)
   console.log('   ', line(top))
   check('12 невозможно (строгий поиск, до трёх заходов за топливом)', best(START, { seed: 11, strict: true, maxDepots: 3 }).best, 11)
-  check('без слива топлива максимум', solve({ ...P, stock: {} }, START).best, 10)
+  // Без слива 11 даёт только «Артель» (раздел 8): курс через «Ключ», «Смену» и «Околицу» без слива — 10.
+  check('без слива топлива максимум', solve({ ...P, stock: {} }, START).best, 11)
+  check('без слива и без «Артели»', solve({ ...P, stock: {} }, START, { forbid: ['artel'] }).best, 10)
   check('без экономии максимум', best({ ...START, canEco: false }).best, 11)
-  for (const id of ['sinica', 'klyuch', 'smena', 'okolica']) check(`без «${ST[id].name}» не больше 10`, best(START, { forbid: [id] }).best <= 10, true)
+  // 11 собирается двумя путями: курсом Веры или через «Артель». Без одной станции курса — только через «Артель».
+  for (const id of ['sinica', 'klyuch', 'smena', 'okolica']) check(`без «${ST[id].name}» и «Артели» не больше 10`, best(START, { forbid: [id, 'artel'] }).best <= 10, true)
+  check('без «Синицы» не больше 10 и с «Артелью»', best(START, { forbid: ['sinica'] }).best <= 10, true)
 
   console.log('\n== 2. Курс Веры без единой правки ==')
   const blind = run(P, VERA)
@@ -284,7 +320,7 @@ function main() {
   check('топлива у Веры после «Околицы»', veraWorld.fuel, 12)
 
   console.log('\n== 3. Развилки из сюжета ==')
-  for (const [id, want] of [['zarya', 7], ['kolybel', 10], ['mayak', 10], ['artel', 9], ['kordon', 2]]) {
+  for (const [id, want] of [['zarya', 7], ['kolybel', 10], ['mayak', 10], ['artel', 11], ['kordon', 2]]) {
     const r = best(START, { must: [id] })
     check(`лучший рейс с «${ST[id].name}»`, r.best, want)
     console.log('   ', line(r))
@@ -352,6 +388,37 @@ function main() {
     if (a.routes[0]) console.log('   ', line(a))
     check(`  то же без экономии`, best({ ...st, canEco: false }, { must: ['kolybel'] }).best, noEco)
   }
+
+  console.log('\n== 8. «Артель Громова»: +144 ч, новость утром д6 ==')
+  for (const [d, want] of [[6, 11], [7, 10], [8, 9]]) {
+    const r = best(stateAt(P, VERA, at(d, 8)), { must: ['artel'] })
+    check(`свернул к «Артели» с курса Веры утром д${d}`, r.best, want)
+    console.log('   ', line(r))
+  }
+  check('с курса Веры утром д6 без «Артели»', best(stateAt(P, VERA, at(6, 8)), { forbid: ['artel'] }).best, 11)
+
+  console.log('\n== 9. «Маяк-3»: −24 ч, новость утром д17 ==')
+  const MR = [S('sinica', 'cruise'), S('smena', 'cruise'), S('okolica', 'cruise'), S('mayak', 'cruise')]
+  check('«Синица», «Смена», «Околица», «Маяк» крейсером, без правок', run(P, MR).aboard, 9)
+  check('тот же курс в мире Веры', run({ ...P, dev: {} }, MR).aboard, 10)
+  for (const [d, want] of [[17, 10], [18, 10], [19, -1]]) {
+    const r = best(stateAt(P, MR, at(d, 8)), { must: ['mayak'] })
+    check(`чинит к «Маяку» утром д${d}`, r.best, want)
+    if (r.routes[0]) console.log('   ', line(r))
+  }
+
+  console.log('\n== 10. Выбрал раз и читает ==')
+  // Все планы без экономии, которые в первый день по данным Веры привозят 10 и больше.
+  // «Не задет» — план, который без единой правки привозит столько же, сколько обещал.
+  const day1 = { ...P, dev: {} }
+  const good = day1Plans(day1).map((legs) => ({ legs, seen: run(day1, legs).aboard })).filter((p) => p.seen >= 10)
+  const untouched = good.filter((p) => run(P, p.legs).aboard === p.seen)
+  const kinds = {}
+  for (const p of untouched) kinds[p.legs.map((l) => ST[l.to].name).join(' → ')] = (kinds[p.legs.map((l) => ST[l.to].name).join(' → ')] ?? 0) + 1
+  console.log(`  хороших планов первого дня: ${good.length}, не задеты отклонениями: ${untouched.length}`)
+  for (const [k, n] of Object.entries(kinds)) console.log(`    ${k}: ${n}`)
+  check('хороших планов первого дня', good.length, 280)
+  check('не задеты отклонениями (было 172 при двух отклонениях)', untouched.length, 90)
 
   console.log(failed ? `\nНе сошлось: ${failed}` : '\nВсё сошлось.')
   process.exit(failed ? 1 : 0)

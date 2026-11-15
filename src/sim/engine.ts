@@ -38,7 +38,7 @@ import {
   VERA_COURSE,
 } from './world'
 
-export const SAVE_VERSION = 5
+export const SAVE_VERSION = 6
 const EPS = 1e-7
 
 export interface Flight {

@@ -165,12 +165,16 @@ describe('числа мира', () => {
     for (const d of STATIONS) expect(d.stock, d.id).toBe(want[d.id])
   })
 
-  it('правда: «Тёплый Ключ» до д9 22:00, «Околица» до д19 20:00, остальные — как у Веры', () => {
+  it('правда: «Ключ» до д9 22:00, «Околица» до д19 20:00, «Артель» до д14 10:00, «Маяк» до д23 16:00, остальные — как у Веры', () => {
     const s = newGame()
     expect(fmt(airEnd(s, 'klyuch'))).toBe('д9 22:00')
     expect(fmt(airEnd(s, 'okolica'))).toBe('д19 20:00')
+    expect(fmt(airEnd(s, 'artel'))).toBe('д14 10:00')
+    expect(fmt(airEnd(s, 'mayak'))).toBe('д23 16:00')
     expect(airEnd(s, 'klyuch', at(6, '20:59'))).toBe(STATION.klyuch.T)
-    for (const d of STATIONS) if (d.id !== 'klyuch' && d.id !== 'okolica') expect(airEnd(s, d.id), d.id).toBe(d.T)
+    expect(airEnd(s, 'artel', at(5, '20:59'))).toBe(STATION.artel.T)
+    const moved = new Set(DEVIATIONS.map((d) => d.station))
+    for (const d of STATIONS) if (!moved.has(d.id)) expect(airEnd(s, d.id), d.id).toBe(d.T)
   })
 
   it('курс диспетчера по сигналу первого утра: 11, топливо 12 после «Околицы», запасы меньше полусуток', () => {
@@ -187,7 +191,7 @@ describe('числа мира', () => {
 })
 
 describe('рейсы', () => {
-  it('курс Веры без правок: 7; «Ключ» опоздание 12 ч, «Околица» 21,5 ч; все маршрутные утра, прощание А', () => {
+  it('курс Веры без правок: 3 (механика 3); «Ключ» опоздание 12 ч, «Околица» 21,5 ч, «Смена» теряется; все маршрутные утра, прощание А', () => {
     const s = newGame()
     applyPlan(s, VERA_COURSE)
     runUntil(s, (x) => x.final.stage === 'farewell')
@@ -196,9 +200,11 @@ describe('рейсы', () => {
     expect(s.vera.farewell).toBe('farewellA')
     expect(s.st.klyuch.rescued).toBe(false)
     expect(s.st.okolica.rescued).toBe(false)
+    expect(s.st.smena.rescued).toBe(false)
     expect(s.st.klyuch.arrived! - airEnd(s, 'klyuch')).toBeCloseTo(12, 0)
     expect(Math.round((s.st.okolica.arrived! - airEnd(s, 'okolica')) * 2) / 2).toBe(21.5)
-    expect(savedCount(s)).toBe(7)
+    expect(s.st.smena.arrived! - airEnd(s, 'smena')).toBeGreaterThan(0)
+    expect(savedCount(s)).toBe(3)
     expect(s.vera.revealed).toBe(true)
     finalFlight(s, 'pereval', 'eco')
     runEpilogue(s)
@@ -340,13 +346,6 @@ describe('рейсы', () => {
 
   const G: [string, Leg[], Partial<Leg>, [StationId, string, number][], number][] = [
     [
-      'Г1',
-      [leg('smena', 'cruise'), leg('okolica', 'burn', true), leg('pereval', 'eco')],
-      { drain: true },
-      [['sinica', 'д5 10:48', 78], ['klyuch', 'д9 15:44', 56], ['smena', 'д15 16:26', 34], ['okolica', 'д19 12:59', 12]],
-      12,
-    ],
-    [
       'Г2',
       [leg('smena', 'cruise', true), leg('okolica', 'burn', true), leg('pereval', 'eco')],
       {},
@@ -361,6 +360,18 @@ describe('рейсы', () => {
       12,
     ],
   ]
+  it('Г1 — ловушка: слив на «Ключе» стоит 18 ч, «Смена» опаздывает на 0,4 ч, спасённых 7', () => {
+    const s = newGame()
+    applyPlan(s, VERA_COURSE)
+    fromDay7(s, [leg('smena', 'cruise'), leg('okolica', 'burn', true), leg('pereval', 'eco')], { drain: true })
+    runUntil(s, (x) => x.st.smena.arrived !== null)
+    expect(fmt(s.st.smena.arrived!)).toBe('д15 16:26')
+    expect(s.st.smena.rescued).toBe(false)
+    expect(Math.round((s.st.smena.arrived! - airEnd(s, 'smena')) * 10) / 10).toBe(0.4)
+    finish(s)
+    expect(savedCount(s)).toBe(7)
+  })
+
   for (const [name, rest, kl, stops, fuelEnd] of G) {
     it(`${name}: 11 спасённых, прибытия и топливо — как в скрипте`, () => {
       const s = newGame()
@@ -401,6 +412,27 @@ describe('рейсы', () => {
     expect(s.st.artel.rescued).toBe(true)
     // Людей выносят: стыковка 12 часов.
     expect(s.tug.dockUntil! - s.st.artel.arrived!).toBeCloseTo(12, 6)
+  })
+
+  it('«Вторая смена» (механика 3): новость утром д13, форсаж спасает до д15, запас тает 13,5 → 7,6 → 1,6 ч', () => {
+    const s = lineB()
+    runNext(s, (x) => x.t >= at(13, '08:00'))
+    expect(s.t).toBeCloseTo(at(13, '08:00'), 6)
+    const n = journalView(s).course.find((x) => x.st === 'smena' && x.marks.includes('air'))
+    expect(n).toBeTruthy()
+    expect(fmt(n!.airWas!)).toBe('д16 04:00')
+    expect(fmt(n!.airNow!)).toBe('д15 16:00')
+    expect(courseState(s)).toMatchObject({ k: 'late', st: 'smena' })
+    expect(Math.round((courseState(s) as { h: number }).h * 10) / 10).toBe(0.4)
+    for (const [day, want] of [[13, 13.5], [14, 7.6], [15, 1.6]] as const) {
+      const t = lineB()
+      runUntil(t, (x) => x.t >= at(day, '08:00'))
+      const r = simulatePlan(t, [leg('smena', 'burn'), leg('okolica', 'cruise'), leg('pereval', 'eco')])
+      expect(r.legs[0]!.margin!, `д${day}`).toBeCloseTo(want, 1)
+    }
+    // Если не трогать: «Смена» опаздывает на 0,4 ч, четверо потеряны.
+    finish(s)
+    expect(s.st.smena.rescued).toBe(false)
   })
 
   it('новость о «Ключе» лежит в журнале к 08:00 дня 7, об «Околице» — к 08:00 дня 15', () => {
@@ -642,27 +674,92 @@ describe('рейсы', () => {
     expect(eveningOptions(s, 20).map((o) => o.id)).toContain('e20d')
     s.st.klyuch.rescued = true
     expect(eveningOptions(s, 10).map((o) => o.id)).toContain('e10a')
+    s.st.okolica.rescued = true
     s.tug.aboard = Array(11).fill('zoya')
     expect(eveningOptions(s, 20).map((o) => o.id)).toContain('e20a')
     expect(eveningOptions(s, 20).map((o) => o.id)).not.toContain('e20d')
   })
 
-  it('«Маяк-3» после дня 21: 10 на борту и прибытие к «Перевалу»', () => {
+  it('вечерние слова пилота не врут о его положении: на любом курсе от двух вариантов', () => {
+    const routes: Record<string, Leg[]> = {
+      вера: VERA_COURSE.map((l) => ({ ...l })),
+      // Прохождение, на котором это нашлось: «Колыбель» после «Синицы», потом «Вторая смена».
+      друг: [leg('sinica', 'cruise'), leg('kolybel', 'cruise'), leg('smena', 'cruise'), leg('pereval', 'eco')],
+      колыбель: [leg('sinica', 'cruise'), leg('kolybel', 'burn'), leg('pereval', 'eco')],
+      заря: [leg('zarya', 'burn'), leg('polynya', 'cruise'), leg('pereval', 'eco')],
+      маяк: [leg('sinica', 'cruise'), leg('klyuch', 'cruise'), leg('smena', 'cruise'), leg('mayak', 'cruise'), leg('pereval', 'eco')],
+      стоим: [leg('pereval', 'eco')],
+    }
+    for (const [name, legs] of Object.entries(routes)) {
+      const s = newGame()
+      applyPlan(s, legs)
+      for (let i = 0; i < 3000 && s.final.stage === 'none'; i++) {
+        if (s.eveningDue === null) {
+          advance(s, 'next')
+          continue
+        }
+        const day = s.eveningDue
+        const ids = eveningOptions(s, day).map((o) => o.id)
+        const where = `${name}, д${day}: ${ids.join(' ')}`
+        expect(ids.length, where).toBeGreaterThanOrEqual(2)
+        const k = s.st.kolybel
+        if (k.rescued || k.arrived !== null) for (const id of ['e11d', 'e12c', 'e12f', 'e12d', 'e13c', 'e14d']) expect(ids, where).not.toContain(id)
+        if (!k.rescued) for (const id of ['e10e', 'e11e', 'e12g', 'e13d']) expect(ids, where).not.toContain(id)
+        if (!s.tug.aboard.includes('fedya')) for (const id of ['e15a', 'e15d']) expect(ids, where).not.toContain(id)
+        if (!s.tug.aboard.includes('ahmed')) expect(ids, where).not.toContain('e15c')
+        if (!s.tug.aboard.includes('zoya')) for (const id of ['e5b', 'e6c', 'e17c']) expect(ids, where).not.toContain(id)
+        if (s.tug.flight?.to !== 'sinica') expect(ids, where).not.toContain('e4a')
+        if (s.tug.flight?.to !== 'smena') expect(ids, where).not.toContain('e14c')
+        if (!s.tug.flight) expect(ids, where).not.toContain('e17d')
+        if (s.vera.mode !== 'route') for (const id of ['e3c', 'e20c']) expect(ids, where).not.toContain(id)
+        chooseEvening(s, ids[0] ?? null)
+      }
+    }
+  })
+
+  it('«Маяк-3»: курс, выбранный в первый день, без правок «Маяк» теряет', () => {
     const s = newGame()
-    applyPlan(s, [leg('sinica', 'cruise'), leg('klyuch', 'burn', true), leg('smena', 'cruise', true), leg('mayak', 'burn'), leg('pereval', 'eco')])
+    applyPlan(s, [leg('sinica', 'cruise'), leg('smena', 'cruise'), leg('okolica', 'cruise'), leg('mayak', 'cruise'), leg('pereval', 'eco')])
+    runNext(s, (x) => x.st.mayak.silentHeard !== null || x.final.stage === 'farewell')
+    // Новость о генераторе приходит вечером д16: игрок узнаёт её до утра д17.
+    expect(s.st.mayak.got.some((g) => g.startsWith('mayak:dev'))).toBe(true)
+    continueAfterFinal(s)
+    runNext(s, (x) => x.st.mayak.arrived !== null || x.tug.flight?.to === 'pereval')
+    expect(s.st.mayak.rescued).toBe(false)
+  })
+
+  it('«Маяк-3» после дня 21: починка утром д17 — экономия и форсаж, 10 на борту', () => {
+    const s = newGame()
+    applyPlan(s, [leg('sinica', 'cruise'), leg('smena', 'cruise'), leg('okolica', 'cruise'), leg('mayak', 'cruise'), leg('pereval', 'eco')])
+    runNext(s, (x) => x.t >= at(17, '08:00'))
+    expect(s.st.mayak.got.some((g) => g.startsWith('mayak:dev'))).toBe(true)
+    expect(orderEco(s, 'mayak')).toBe(true)
+    expect(applyPlan(s, [leg('okolica', 'cruise', true), leg('mayak', 'burn'), leg('pereval', 'eco')]).ok).toBe(true)
     runNext(s, (x) => x.final.stage === 'farewell')
-    expect(s.t).toBe(at(21, '08:00'))
     expect(s.tug.flight?.to).toBe('mayak')
     expect(savedCount(s)).toBe(9)
     expect(continueAfterFinal(s)).toBe(true)
     const back = deserialize(serialize(s))!
     runNext(back, (x) => x.tug.flight?.to === 'pereval')
     expect(back.st.mayak.rescued).toBe(true)
-    expect(fmt(back.st.mayak.arrived!)).toBe('д23 23:13')
+    expect(fmt(back.st.mayak.arrived!)).toBe('д23 22:18')
     runEpilogue(back)
     expect(back.tug.at).toBe('pereval')
     expect(savedCount(back)).toBe(10)
     expect(back.ending?.kind).toBe('svoy')
+  })
+
+  it('«Артель Громова»: патроны нашлись, новость утром д6, поворот даёт 11', () => {
+    const s = newGame()
+    applyPlan(s, VERA_COURSE)
+    runNext(s, (x) => x.t >= at(6, '08:00'))
+    expect(s.st.artel.got.some((g) => g.startsWith('artel:dev'))).toBe(true)
+    expect(orderEco(s, 'artel')).toBe(true)
+    expect(applyPlan(s, [leg('klyuch', 'burn'), leg('artel', 'burn'), leg('pereval', 'eco')]).ok).toBe(true)
+    runNext(s, (x) => x.st.artel.arrived !== null)
+    expect(s.st.klyuch.rescued).toBe(true)
+    expect(s.st.artel.rescued).toBe(true)
+    expect(savedCount(s)).toBe(11)
   })
 
   it('ожидание после стыковки: слив доступен, вылет напрямую до прощания запрещён', () => {

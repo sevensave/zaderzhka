@@ -1205,3 +1205,21 @@ select {
 .act > .row-btns {
   align-self: flex-start;
 }
+
+/* Свёрнутый старый сеанс в карточке станции и кнопка «ещё N: не успеть» в списке. */
+.sess.folded {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.sess.folded:hover {
+  opacity: 1;
+}
+.row.more {
+  text-align: left;
+  cursor: pointer;
+}

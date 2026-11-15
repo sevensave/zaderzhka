@@ -2,7 +2,7 @@
 // Панель закрывает пульт и нижнюю часть окна; верхние 48 пикселей космоса видны всегда.
 
 import { personStatus } from '../content/board'
-import { eveningOptions, eveningText, LAST_WORDS } from '../content/evenings'
+import { eveningOptions, eveningText, lastWordsOptions } from '../content/evenings'
 import { PEOPLE } from '../content/people'
 import {
   DRIFT_SCENE,
@@ -19,9 +19,12 @@ import { replyText, SCRIPTS } from '../content/stations'
 import {
   confirmCourse,
   FINAL_WAIT,
+  FINAL_WAIT_HOW,
+  PROLOGUE_HOW,
   GEN,
   LAST_FLIGHT_HINT,
-  WORD_EFFECT,
+  WORD_EVENING_HEAD,
+  WORD_EVENING_NOTE,
   DRAIN_ONCE,
   drainLive,
   drainSilent,
@@ -201,13 +204,7 @@ export function prologue(app: App, done: () => void): void {
   const { body, foot } = shell(app, 'prologue', 'РЕЙС', { modal: true, cls: 'narrow' })
   const lines = PROLOGUE.map((p) => speech(p))
   body.append(...lines)
-  body.append(
-    h(
-      'div',
-      { class: 'data dimtxt help' },
-      'Время идёт, только когда ты нажимаешь «Дальше». Думать над курсом можно сколько угодно.',
-    ),
-  )
+  body.append(...PROLOGUE_HOW.map((t) => h('div', { class: 'data dimtxt help' }, t)))
   foot.append(
     btn(
       'ДАЛЬШЕ',
@@ -386,17 +383,27 @@ export function card(app: App, id: StationId): void {
     ...(rt.order ? [{ at: rt.order.sent, kind: 'order' as const, order: rt.order }] : []),
     ...(rt.silentHeard !== null && !rt.rescued ? [{ at: rt.silentHeard, kind: 'silence' as const }] : []),
   ].sort((a, b) => a.at - b.at)
+  // Старые сеансы свёрнуты до строки: развёрнуты два последних и все непрочитанные.
+  const stationIds = thread.filter((x) => x.kind === 'station').map((x) => (x as { session: { id: string } }).session.id)
+  const recent = new Set(stationIds.slice(-2))
   for (const l of thread) {
     if (l.kind === 'station') {
       const ss = l.session
-      right.append(
-        h(
-          'div',
-          { class: `sess${unreadIds.has(ss.id) ? ' new' : ''}` },
-          h('div', { class: 'data sess-head' }, `${stamp(ss.at)}${ss.letter ? ' · письмо' : ''}`),
-          speech(ss.text),
-        ),
+      const full = h(
+        'div',
+        { class: `sess${unreadIds.has(ss.id) ? ' new' : ''}` },
+        h('div', { class: 'data sess-head' }, `${stamp(ss.at)}${ss.letter ? ' · письмо' : ''}`),
+        speech(ss.text),
       )
+      if (recent.has(ss.id) || unreadIds.has(ss.id)) right.append(full)
+      else {
+        const folded = h(
+          'button',
+          { class: 'sess folded', onclick: () => folded.replaceWith(full), title: 'Развернуть' },
+          h('div', { class: 'data sess-head' }, `${stamp(ss.at)}${ss.letter ? ' · письмо' : ''} ▸ ${clip(ss.text.replace(/\s+/g, ' '), 70)}`),
+        )
+        right.append(folded)
+      }
     } else if (l.kind === 'player') {
       const rp = l.reply
       right.append(
@@ -425,43 +432,8 @@ export function card(app: App, id: StationId): void {
 
   // 6. Слово и распоряжение — раздельно, у каждого одна строка о последствии.
   const acts = h('div', { class: 'acts' })
-  const opts = replyOptions(s, id)
-  if (opts.length) {
-    const labels: Record<ReplyKind, string> = { truth: 'ПРАВДА', hold: 'ДЕРЖИТЕСЬ, Я ИДУ', eta: 'ТОЧНОЕ ВРЕМЯ', papa: 'ПОЗОВИ ПАПУ' }
-    const burn = directCalc(s, id).find((c) => c.mode === 'burn')!
-    const legRes = simulatePlan(s, activeLegs(s)).legs.find((l) => l.leg.to === id)
-    const info = { late: `опоздание ${hours(burn.margin)}`, eta: legRes ? stamp(legRes.arrive) : '' }
-    let chosen: ReplyKind | null = null
-    const preview = h('div', { class: 'reply-preview' })
-    const send = btn('ОТПРАВИТЬ СЛОВО', () => {
-      if (!chosen) return
-      sendReply(s, id, chosen, replyText(chosen, def.name, info))
-      app.save()
-      app.refresh()
-      card(app, id)
-    }, 'primary', true)
-    const buttons = opts.map((k) => {
-      const b = btn(labels[k], () => {
-        chosen = k
-        for (const x of buttons) x.classList.toggle('on', x === b)
-        clear(preview)
-        preview.append(speech(replyText(k, def.name, info)))
-        send.disabled = false
-      })
-      return b
-    })
-    acts.append(
-      h(
-        'div',
-        { class: 'act' },
-        h('div', { class: 'px sub' }, 'СЛОВО'),
-        h('div', { class: 'row-btns' }, ...buttons),
-        preview,
-        h('div', { class: 'data dimtxt' }, WORD_EFFECT(travel)),
-        send,
-      ),
-    )
-  }
+  // Слово живёт в вечернем ритуале (20:00), в карточке о нём одна строка.
+  if (replyOptions(s, id).length) acts.append(h('div', { class: 'data dimtxt' }, WORD_EVENING_NOTE))
   if (!rt.rescued && rt.silentHeard === null && rt.arrived === null && (canOrderEco(s, id) || rt.order)) {
     const act = h('div', { class: 'act' }, h('div', { class: 'px sub' }, 'РАСПОРЯЖЕНИЕ'))
     if (rt.order) {
@@ -701,6 +673,7 @@ export function planner(app: App, focus?: PlaceId | 'last'): void {
     h('div', { class: 'dimtxt' }, `Бак перед финалом: ${Math.round(Math.max(0, beforeFinal))} из ${TANK}. Отметка ${MIN_FLIGHT} — экономный перелёт до «Перевала».`),
     bar,
     err ? h('div', { class: 'warn' }, err) : null,
+    err === FINAL_WAIT ? h('div', { class: 'dimtxt' }, FINAL_WAIT_HOW) : null,
   )
   body.append(table, h('div', { class: 'plan-add' }, sel), summary)
 
@@ -728,7 +701,9 @@ export function planner(app: App, focus?: PlaceId | 'last'): void {
       app.draft = null
       planner(app)
     }),
-    btn(idle && legs.length ? 'УТВЕРДИТЬ И ЛЕТЕТЬ' : 'УТВЕРДИТЬ КУРС', approve, 'primary', !!err || (!!flying && !legs.length)),
+    err === FINAL_WAIT
+      ? btn('ЖДАТЬ', () => app.closePanel(), 'primary')
+      : btn(idle && legs.length ? 'УТВЕРДИТЬ И ЛЕТЕТЬ' : 'УТВЕРДИТЬ КУРС', approve, 'primary', !!err || (!!flying && !legs.length)),
   )
   app.refresh()
   if (focus) requestAnimationFrame(() => table.querySelector('.focus')?.scrollIntoView({ block: 'nearest' }))
@@ -771,7 +746,7 @@ export function dock(app: App, id: StationId): void {
     if (!next) body.append(h('div', { class: 'data dimtxt card-line' }, 'Следующей цели в курсе нет. Когда стоянка кончится, откроется планировщик.'))
   }
 
-  if (next?.to === 'pereval' && s.final.stage === 'none') body.append(line(FINAL_WAIT))
+  if (next?.to === 'pereval' && s.final.stage === 'none') body.append(line(FINAL_WAIT), h('div', { class: 'data dimtxt card-line' }, FINAL_WAIT_HOW))
 
   // Слив.
   const done = app.drained[id]
@@ -1061,35 +1036,67 @@ export function evening(app: App): void {
   const s = app.s
   if (!s || s.eveningDue === null) return
   const day = s.eveningDue
-  const { body, foot } = shell(app, 'evening', `20:00 · СООБЩЕНИЕ НА «ПОРОГ»`, { modal: true, cls: 'narrow' })
+  const { body, foot } = shell(app, 'evening', `20:00 · ВЕЧЕР`, { modal: true, cls: 'wide scroll' })
   const delay = porogDelay(s)
-  body.append(h('div', { class: 'data dimtxt' }, `День ${day}. Задержка ${dur(delay)}. Квитанция — через ${dur(delay * 2)}.`))
-  const opts = eveningOptions(s, day)
-  const list = h('div', { class: 'choices' })
-  for (const o of opts) {
-    list.append(
-      h(
-        'button',
-        {
-          class: 'choice',
-          onclick: () => {
-            chooseEvening(s, o.id)
-            app.closePanel(false)
-            app.afterChange([])
-          },
-        },
-        speech(o.text),
-      ),
+
+  // Слова станциям: выбор копится в picks и уходит вместе с сообщением на «Порог».
+  const labels: Record<ReplyKind, string> = { truth: 'ПРАВДА', hold: 'ДЕРЖИТЕСЬ, Я ИДУ', eta: 'ТОЧНОЕ ВРЕМЯ', papa: 'ПОЗОВИ ПАПУ' }
+  const picks = new Map<StationId, ReplyKind>()
+  const info = (id: StationId) => {
+    const burn = directCalc(s, id).find((c) => c.mode === 'burn')!
+    const legRes = simulatePlan(s, activeLegs(s)).legs.find((l) => l.leg.to === id)
+    return { late: `опоздание ${hours(burn.margin)}`, eta: legRes ? stamp(legRes.arrive) : '' }
+  }
+  const ids = (Object.keys(STATION) as StationId[]).filter((id) => replyOptions(s, id).length)
+  const reachable = ids.filter((id) => stationView(s, id).status !== 'out')
+  const others = ids.filter((id) => stationView(s, id).status === 'out')
+  const rowFor = (id: StationId): HTMLElement => {
+    const def = STATION[id]
+    const preview = h('div', { class: 'reply-preview' })
+    const buttons = replyOptions(s, id).map((k) => {
+      const b = btn(labels[k], () => {
+        const on = picks.get(id) !== k
+        if (on) picks.set(id, k)
+        else picks.delete(id)
+        for (const x of buttons) x.classList.toggle('on', on && x === b)
+        clear(preview)
+        if (on) preview.append(speech(replyText(k, def.name, info(id))))
+      })
+      return b
+    })
+    return h(
+      'div',
+      { class: 'efir-st' },
+      h('div', { class: 'data efir-head' }, `«${def.name}» · ${def.people} чел. · сигнал идёт ${dur(dist(tugPos(s), def))}`),
+      h('div', { class: 'row-btns' }, ...buttons),
+      preview,
     )
   }
-  body.append(list)
-  foot.append(
-    btn('ПРОМОЛЧАТЬ', () => {
-      chooseEvening(s, null)
-      app.closePanel(false)
-      app.afterChange([])
-    }),
+  // Сообщение на «Порог».
+  const send = (choice: string | null) => {
+    for (const [id, k] of picks) sendReply(s, id, k, replyText(k, STATION[id].name, info(id)))
+    chooseEvening(s, choice)
+    app.closePanel(false)
+    app.afterChange([])
+  }
+  body.append(
+    h('div', { class: 'px sub' }, 'СООБЩЕНИЕ НА «ПОРОГ»'),
+    h('div', { class: 'data dimtxt' }, `День ${day}. Задержка ${dur(delay)}. Квитанция — через ${dur(delay * 2)}.`),
   )
+  const list = h('div', { class: 'choices' })
+  for (const o of eveningOptions(s, day)) {
+    list.append(h('button', { class: 'choice', onclick: () => send(o.id) }, speech(o.text)))
+  }
+  body.append(list)
+  if (ids.length) {
+    body.append(h('div', { class: 'px sub' }, 'СЛОВА СТАНЦИЯМ'), h('div', { class: 'data dimtxt' }, WORD_EVENING_HEAD))
+    for (const id of reachable) body.append(rowFor(id))
+    if (others.length) {
+      body.append(h('details', { class: 'efir-more' }, h('summary', { class: 'data dimtxt' }, `Остальные станции: ${others.length}`), ...others.map(rowFor)))
+    }
+  }
+
+  foot.append(btn('ПРОМОЛЧАТЬ', () => send(null)))
 }
 
 // ——— сцены ———
@@ -1258,7 +1265,7 @@ function lastWords(app: App): void {
     } else go(app, 'flight')
   }
   const list = h('div', { class: 'choices' })
-  for (const o of LAST_WORDS) list.append(h('button', { class: 'choice', onclick: () => send(o.text) }, speech(o.text)))
+  for (const o of lastWordsOptions(s)) list.append(h('button', { class: 'choice', onclick: () => send(o.text) }, speech(o.text)))
   const ta = h('textarea', { class: 'free', maxlength: '400', rows: '3', placeholder: 'Своими словами…' }) as HTMLTextAreaElement
   body.append(list, ta)
   foot.append(

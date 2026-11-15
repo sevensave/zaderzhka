@@ -104,6 +104,11 @@ export class App {
   draft: Leg[] | null = null
 
   private rows: HTMLElement[] = []
+  private moreB: HTMLElement | null = null
+  /** Номер места строки в списке (−1 — свёрнута). Нужен и для маркеров на холсте. */
+  private rowSlot: number[] = STATIONS.map((_, i) => i)
+  /** Развёрнут ли список станций, до которых не успеть. */
+  private listOpen = false
   private right: Record<string, HTMLElement> = {}
   private hint!: HTMLElement
   private tip!: HTMLElement
@@ -291,7 +296,15 @@ export class App {
   afterChange(notices: Notice[], stop = false): void {
     if (!this.s) return
     this.syncVis()
-    const incoming = [...new Set(notices.filter((n): n is Extract<Notice, { k: 'session' }> => n.k === 'session').map((n) => n.st))]
+    // Звук и всплывающая строка — только от тех, с кем можно что-то сделать: на курсе или успеваю,
+    // и от новостей об отклонениях. Серые строки зовут в журнале и в списке, не дёргая игрока.
+    const s0 = this.s
+    const loud = (n: Extract<Notice, { k: 'session' }>) => {
+      if (n.id.includes(':dev')) return true
+      const st = stationView(s0, n.st).status
+      return st === 'course' || st === 'off'
+    }
+    const incoming = [...new Set(notices.filter((n): n is Extract<Notice, { k: 'session' }> => n.k === 'session' && loud(n)).map((n) => n.st))]
     if (incoming.length) this.notifyStations(incoming)
     const journal = stop ? this.journalSlot(notices) : null
     if (journal === 'before') this.queue.push({ k: 'journal' })
@@ -545,6 +558,16 @@ export class App {
       this.rows.push(row)
       hud.append(row)
     })
+    // Строка-переключатель: станции «не успеть» свёрнуты, чтобы первый экран не был стеной из 14 строк.
+    this.moreB = h('button', {
+      class: 'row data more dimtxt',
+      style: { ...pos(L.x + 1, L.y + 10 + STATIONS.length * 6), width: u(L.w - 2), height: u(6) },
+      onclick: () => {
+        this.listOpen = !this.listOpen
+        this.refresh()
+      },
+    })
+    hud.append(this.moreB)
 
     const R = PANEL.right
     const r = this.right
@@ -687,6 +710,42 @@ export class App {
     this.stripHint.classList.toggle('hidden', !hint)
   }
 
+  /** Свернуть строки «не успеть» под одну строку-переключатель; выбранную, непрочитанную и подсказанную оставить. */
+  private layoutRows(s: GameState, plan: ReturnType<typeof simulatePlan>): void {
+    const L = PANEL.left
+    let k = 0
+    let hidden = 0
+    let hiddenNew = 0
+    // Развёрнутые 14 строк и кнопка «свернуть» не влезают в панель с шагом 6, поэтому шаг сжимается.
+    const pitch = this.listOpen ? 5.5 : 6
+    STATIONS.forEach((d, i) => {
+      const v = stationView(s, d.id, plan)
+      const row = this.rows[i]!
+      const keep =
+        this.listOpen ||
+        v.status !== 'out' ||
+        this.selected === d.id ||
+        (d.id === 'polynya' && !this.hintSeen.polynya && !s.tug.flight && s.t < 12)
+      row.style.display = keep ? '' : 'none'
+      this.rowSlot[i] = keep ? k : -1
+      if (keep) {
+        Object.assign(row.style, pos(L.x + 1, L.y + 10 + k * pitch), { height: u(pitch) })
+        k++
+      } else {
+        hidden++
+        if (s.st[d.id].unread) hiddenNew++
+      }
+    })
+    const more = this.moreB!
+    if (hidden === 0 && !this.listOpen) {
+      more.style.display = 'none'
+      return
+    }
+    more.style.display = ''
+    Object.assign(more.style, pos(L.x + 1, L.y + 10 + k * pitch), { height: u(pitch) })
+    more.textContent = this.listOpen ? 'свернуть «не успеть»' : `ещё ${hidden}: не успеть${hiddenNew ? ` · новых ${hiddenNew}` : ''} ▾`
+  }
+
   /** Обновить текст пульта под состояние. */
   refresh(): void {
     const s = this.s
@@ -708,10 +767,14 @@ export class App {
         if (v.status === 'out' && v.margin === null) m!.append(': нет топлива')
         else if (v.margin !== null) {
           m!.append(', ')
-          m!.append(v.margin < 0 ? h('span', { class: 'late' }, `опоздание ${hours(v.margin)}`) : `запас ${hours(v.margin)}`)
+          // Числа за двое суток читаются как сутки: «запас 150,6 ч» новичку ни о чём не говорит.
+          const far = Math.abs(v.margin) > 48
+          const span = far ? `${Math.round(Math.abs(v.margin) / 24)} сут` : hours(v.margin)
+          m!.append(v.margin < 0 ? h('span', { class: 'late' }, `опоздание ${span}`) : `запас ${span}`)
         }
       }
     })
+    this.layoutRows(s, plan)
 
     const r = this.right
     const delay = porogDelay(s)
@@ -754,7 +817,7 @@ export class App {
       )
     } else if (s.tug.at && !isFinal(s.tug.at) && (s.plan[0]?.to === 'pereval' && s.final.stage === 'none')) {
       this.hint.append(
-        h('span', null, FINAL_WAIT + ' '),
+        h('span', null, `${FINAL_WAIT} Ждать — «Дальше». `),
         h('button', { class: 'btn px go', disabled: busy, onclick: () => P.dock(this, s.tug.at as StationId) }, 'СТОЯНКА'),
       )
     } else if (s.plan.length) {
@@ -905,7 +968,8 @@ export class App {
     const L = PANEL.left
     STATIONS.forEach((d, i) => {
       const rt = s.st[d.id]
-      const y = L.y + 10 + i * 6 + 2
+      if (this.rowSlot[i]! < 0) return
+      const y = L.y + 10 + this.rowSlot[i]! * (this.listOpen ? 5.5 : 6) + 2
       const v: StationView = stationView(s, d.id)
       const col = v.status === 'silent' ? C.steel : v.status === 'aboard' ? C.text : C.ice
       fillRect(x, col, L.x + 3, y, 2, 2)
