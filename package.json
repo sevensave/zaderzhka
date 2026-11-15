@@ -1,0 +1,33 @@
+{
+  "name": "zaderzhka",
+  "version": "2.0.0",
+  "description": "Задержка: сюжетная стратегия про спасательный буксир и сигналы, которые идут часами",
+  "author": "vldvr",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "homepage": "https://github.com/sevensave/zaderzhka",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "web": "vite --config vite.web.config.ts",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "pack:mac": "npm run build && electron-builder --mac --arm64 --x64 --publish never",
+    "pack:win": "npm run build && electron-builder --win --x64 --publish never",
+    "pack": "npm run build && electron-builder --mac --arm64 --x64 --publish never && electron-builder --win --x64 --publish never && node tools/check-release.mjs"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/pixelify-sans": "5.3.0",
+    "@fontsource/pt-serif": "5.3.0",
+    "@types/node": "22.20.5",
+    "electron": "45.1.0",
+    "electron-builder": "26.18.0",
+    "electron-vite": "6.0.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.0.5"
+  }
+}

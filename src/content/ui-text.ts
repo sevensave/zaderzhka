@@ -1,0 +1,194 @@
+// Строки интерфейса второй версии (механика 2.0, разделы 7, 8, 10) в одном месте.
+// Этапы 3 и 4 берут готовое отсюда. Игра говорит, что изменилось, и не говорит, что делать.
+// Числа сюда приходят аргументами: своих чисел у строк нет, кроме констант мира.
+
+import type { CourseState, JournalMark } from '../sim/engine'
+import { clockOf, DOCK_H, DRAIN_H, ECO_AIR_H, ECO_DOCK_H, FINALS, STATION, type PlaceId, type StationId } from '../sim/world'
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+/** «д9 22:00» — момент в часах от первой сводки. */
+export function stamp(t: number): string {
+  const c = clockOf(t)
+  return `д${c.day} ${pad2(c.h)}:${pad2(c.m)}`
+}
+
+/** Часы без лишнего нуля: «12», «21,5». */
+export function hrs(h: number): string {
+  const r = Math.round(h * 10) / 10
+  return String(r).replace('.', ',')
+}
+
+/** Название места в кавычках-ёлочках. */
+export function q(id: PlaceId): string {
+  const name = id === 'porog' || id === 'pereval' ? FINALS[id].name : STATION[id].name
+  return `«${name}»`
+}
+
+/** Творительный падеж названия: «со Второй сменой». Названия у «Перевала» и «Порога» в стыковке не нужны. */
+export const INSTR: Record<StationId, string> = {
+  sinica: 'Синицей',
+  klyuch: 'Тёплым Ключом',
+  smena: 'Второй сменой',
+  okolica: 'Околицей',
+  kolybel: 'Колыбелью',
+  zarya: 'Зарёй',
+  mayak: 'Маяком-3',
+  polynya: 'Полыньёй',
+  vetra: 'Семью Ветрами',
+  kovsh: 'Ковшом',
+  artel: 'Артелью Громова',
+  matryoshka: 'Матрёшкой',
+  yar: 'Белым Яром',
+  kordon: 'Дальним Кордоном',
+}
+
+/** Родительный падеж: «стыковка у „Синицы“». */
+export const GEN: Record<PlaceId, string> = {
+  sinica: 'Синицы', klyuch: 'Тёплого Ключа', smena: 'Второй смены', okolica: 'Околицы',
+  kolybel: 'Колыбели', zarya: 'Зари', mayak: 'Маяка-3', polynya: 'Полыньи',
+  vetra: 'Семи Ветров', kovsh: 'Ковша', artel: 'Артели Громова', matryoshka: 'Матрёшки',
+  yar: 'Белого Яра', kordon: 'Дальнего Кордона', porog: 'Порога', pereval: 'Перевала',
+}
+
+export const FINAL_WAIT = 'Вылет после сводки дня 21.'
+export const LAST_FLIGHT_HINT = 'Выбери цель и режим: начнётся последний перелёт.'
+export const WORD_EFFECT = (travel: string) => `Дойдёт через ${travel}. На воздух не влияет. Слово одно; молчать — тоже ответ.`
+
+/** Родительный падеж финалов: «до „Перевала“». */
+export const GEN_FINAL: Record<'porog' | 'pereval', string> = { porog: 'Порога', pereval: 'Перевала' }
+
+/** «с Синицей», «со Второй сменой». */
+export function withStation(id: StationId): string {
+  return `${id === 'smena' ? 'со' : 'с'} «${INSTR[id]}»`
+}
+
+// ——— кнопка «Дальше» (раздел 7) ———
+
+export const NEXT = {
+  morning: 'Дальше: до утра',
+  evening: 'Дальше: до вечера',
+  dockEnd: 'Дальше: до конца стоянки',
+  departFinal: (to: 'porog' | 'pereval') => `Дальше: до вылета на «${FINALS[to].name}»`,
+  arriveStation: (id: StationId) => `Дальше: до стыковки ${withStation(id)}`,
+  arriveFinal: (to: 'porog' | 'pereval') => `Дальше: до «${GEN_FINAL[to]}»`,
+  hour: '+1 час',
+}
+
+// ——— строка состояния: три вида (раздел 7) ———
+
+export function statusLine(c: CourseState): string {
+  switch (c.k) {
+    case 'ok':
+      return `Курс сходится. На борту к концу: ${c.saved}.`
+    case 'late':
+      return `Курс не сходится: ${q(c.st)}, опоздание ${hrs(c.h)} ч.`
+    case 'fuel':
+      return `До «Перевала» не хватает ${hrs(c.need)} топлива.`
+  }
+}
+
+// ——— четыре подсказки первого дня (раздел 10) ———
+// Голос пульта, не Веры. Каждая исчезает после действия. В настройках их можно выключить.
+
+export const HINTS = [
+  '«Полынья» зовёт громче всех. Открой её строку.',
+  'Открой курс.',
+  'Утверди курс. Буксир вылетит.',
+  'Дальше — до вечера.',
+]
+
+// ——— журнал (раздел 7) ———
+
+export const JOURNAL = {
+  title: 'Журнал',
+  onCourse: 'По курсу',
+  others: 'Остальные',
+  empty: 'С прошлой остановки ничего не пришло.',
+}
+
+/** Пометка у строки журнала. */
+export function journalMark(mark: JournalMark, item: { airWas?: number; airNow?: number }): string {
+  switch (mark) {
+    case 'air':
+      return item.airWas !== undefined && item.airNow !== undefined
+        ? `воздух: было до ${stamp(item.airWas)}, стало до ${stamp(item.airNow)}`
+        : 'воздух изменился'
+    case 'silent':
+      return 'замолчала'
+    case 'letter':
+      return 'письмо'
+  }
+}
+
+// ——— подтверждения ———
+
+/** Три последствия экономии, названные до отправки (раздел 6). */
+export const ECO_CONSEQUENCES = [
+  `Воздуха станции станет на ${ECO_AIR_H} ч больше, если распоряжение дойдёт, пока он не кончился.`,
+  'Люди перестанут выходить на связь. Раз в сутки придёт строка автомата.',
+  `Стыковка займёт ${DOCK_H + ECO_DOCK_H} ч вместо ${DOCK_H}.`,
+]
+export const ECO_NO_UNDO = 'Отменить нельзя.'
+
+/** Вопрос перед утверждением курса, который не сходится или кончается дрейфом (раздел 8). */
+export function confirmCourse(c: CourseState): string | null {
+  switch (c.k) {
+    case 'ok':
+      return null
+    case 'late':
+      return `Курс не сходится: ${q(c.st)}, опоздание ${hrs(c.h)} ч. Утвердить?`
+    case 'fuel':
+      return `До «Перевала» не хватает ${hrs(c.need)} топлива. Буксир уйдёт в дрейф. Утвердить?`
+  }
+}
+
+// ——— два новых инструмента: одна фраза в минуту, когда они впервые нужны (раздел 10, правило 8) ———
+
+/** На первой стоянке. */
+export const DRAIN_ONCE = `Топливо станции можно слить в бак. Стоянка станет на ${DRAIN_H} ч длиннее.`
+/** Когда курс впервые не сошёлся. */
+export const MODE_SWITCH_ONCE = 'Режим можно сменить и в полёте. Спишется только разница разгонов.'
+
+// ——— стоянка ———
+
+/** Слив на станции, где люди ещё были живы. */
+export function drainLive(id: StationId, fuel: number): string {
+  return `«${STATION[id].name}» отдаёт топливо в твой бак: +${fuel}. Шланги тянут вручную, стоянка идёт на ${DRAIN_H} ч дольше.`
+}
+
+/** Слив на станции, которая уже молчала. */
+export function drainSilent(id: StationId, fuel: number): string {
+  return `«${STATION[id].name}» не отвечает. Топливо из хранилища идёт в бак: +${fuel}. Стоянка на ${DRAIN_H} ч дольше.`
+}
+
+/** Опоздание называется числами: когда кончился воздух и когда пришёл буксир. */
+export function lateNumbers(airEndT: number, arrivedT: number): string {
+  return `Воздух кончился в ${stamp(airEndT)}. Буксир пришёл в ${stamp(arrivedT)}.`
+}
+
+// ——— «Как играть» (раздел 10) ———
+
+export const HELP = {
+  // Правило Веры, слово в слово (сюжет, vera.ts). «Запас воздуха» здесь — сколько воздуха осталось у станции, не «запас» словаря.
+  rule: 'Возраст сигнала плюс время подлёта должны быть меньше запаса воздуха.\nВсё остальное — не твой рейс.',
+  words: [
+    ['запас', 'сколько часов воздуха у станции в остатке к твоему прибытию'],
+    ['опоздание', 'на сколько часов буксир приходит позже, чем кончается воздух'],
+    ['режим', 'как летит буксир: экономный, крейсерский или форсаж. Быстрее — дороже по топливу'],
+    ['слив', `забрать топливо станции в бак. Стоянка станет на ${DRAIN_H} часов длиннее`],
+    ['экономия', `распоряжение станции: лечь и молчать. Воздуха на ${ECO_AIR_H} часов больше, стыковка на ${ECO_DOCK_H} часов дольше`],
+    ['курс', 'очередь станций в планировщике до «Перевала»'],
+  ] as [string, string][],
+  keys: [
+    ['Пробел', 'дальше, до остановки'],
+    ['+1 час', 'один час, чтобы вылететь точно'],
+    ['P', 'планировщик курса'],
+    ['K', 'канал «Порог»'],
+    ['B', 'борт и почта'],
+    ['A', 'архив'],
+    ['Esc', 'закрыть экран, меню'],
+    ['F11', 'полный экран'],
+  ] as [string, string][],
+  card: 'Строка в списке — станция. Щелчок по строке или по точке на плоттере открывает карточку: все сеансы, ответ и распоряжение. Всё, что ты слышишь, уже прошлое: у каждого числа подписан возраст.',
+}

@@ -1,0 +1,22 @@
+// 19 цветов дизайн-гайда. Новые не добавляются.
+export const C = {
+  void: '#05060d',
+  deep: '#0c1024',
+  indigo: '#16204a',
+  blue: '#2a3f7a',
+  cold: '#4a6fb5',
+  ice: '#8fb8e0',
+  glint: '#d6ecff',
+  violet: '#3b2a5c',
+  lilac: '#7a4f8f',
+  sun: '#f4e6b8',
+  panel: '#0e1116',
+  body: '#1b222c',
+  edge: '#2e3947',
+  steel: '#56657a',
+  dim: '#7d8ba0',
+  text: '#a9b8c8',
+  fresh: '#e8f0f7',
+  amber: '#ffb347',
+  red: '#ff6b6b',
+} as const

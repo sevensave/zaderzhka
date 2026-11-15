@@ -1,0 +1,27 @@
+node_modules/
+release/
+.DS_Store
+*.log
+out/
+
+# Локальные документы и настройки; в публичную историю не включаются.
+AGENTS.md
+CLAUDE.md
+PLAN-*.md
+zaderzhka-*.md
+.agents/
+.claude/
+.codex/
+.idea/
+.vscode/
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.tsbuildinfo
+coverage/
+output/
+tmp/
